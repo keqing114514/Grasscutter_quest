@@ -30,7 +30,7 @@ public class AvatarData extends GameResource {
     @Getter private String cutsceneShow;
     @Getter private int skillDepotId;
     @Getter private int staminaRecoverSpeed;
-    @Getter private List<String> candSkillDepotIds;
+    @Getter private List<Integer> candSkillDepotIds;
     @Getter private String avatarIdentityType;
     @Getter private List<Integer> avatarPromoteRewardLevelList;
     @Getter private List<Integer> avatarPromoteRewardIdList;
@@ -155,6 +155,10 @@ public class AvatarData extends GameResource {
         }
         */
 
+        rebuildAbilityEmbryo();
+    }
+
+    public void rebuildAbilityEmbryo(){// rebuild ability for different scene
         // Cache abilities
         String[] split = this.iconName.split("_");
         if (split.length > 0) {
