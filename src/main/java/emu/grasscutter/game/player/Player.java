@@ -42,7 +42,7 @@ import emu.grasscutter.game.managers.mapmark.MapMarksManager;
 import emu.grasscutter.game.managers.stamina.StaminaManager;
 import emu.grasscutter.game.props.*;
 import emu.grasscutter.game.quest.QuestManager;
-import emu.grasscutter.game.quest.enums.QuestTrigger;
+import emu.grasscutter.game.quest.enums.QuestContent;
 import emu.grasscutter.game.shop.ShopLimit;
 import emu.grasscutter.game.tower.TowerData;
 import emu.grasscutter.game.tower.TowerManager;
@@ -198,6 +198,10 @@ public class Player {
     @Getter @Setter private int nextResinRefresh;
     @Getter @Setter private int lastDailyReset;
     @Getter private transient MpSettingType mpSetting = MpSettingType.MP_SETTING_TYPE_ENTER_AFTER_APPLY;  // TODO
+    // keep track of EXEC_ADD_QUEST_PROGRESS count, will be used in CONTENT_ADD_QUEST_PROGRESS
+    // not sure where to put this, this should be saved to DB but not to individual quest, since 
+    // it will be hard to loop and compare
+    @Getter private Map<Integer, Integer> questProgressCountMap;
 
     @Deprecated
     @SuppressWarnings({"rawtypes", "unchecked"}) // Morphia only!
@@ -266,6 +270,7 @@ public class Player {
         this.furnitureManager = new FurnitureManager(this);
         this.cookingManager = new CookingManager(this);
         this.cookingCompoundManager=new CookingCompoundManager(this);
+        this.questProgressCountMap = new HashMap<>();
     }
 
     // On player creation
@@ -428,7 +433,7 @@ public class Player {
 
             // Handle open state unlocks from level-up.
             this.getProgressManager().tryUnlockOpenStates();
-            this.getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_PLAYER_LEVEL_UP, level);
+            this.getQuestManager().queueEvent(QuestContent.QUEST_CONTENT_PLAYER_LEVEL_UP, level);
 
             return true;
         }
@@ -573,7 +578,7 @@ public class Player {
                 // If trigger hasn't been fired yet
                 if (!Boolean.TRUE.equals(quest.getTriggers().put("ENTER_REGION_"+ region.config_id, true))) {
                     //getSession().send(new PacketServerCondMeetQuestListUpdateNotify());
-                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("ENTER_REGION_"+ region.config_id).getId(),0);
+                    getQuestManager().queueEvent(QuestContent.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("ENTER_REGION_"+ region.config_id).getId(),0);
                 }
             }
         });
@@ -586,7 +591,7 @@ public class Player {
                 // If trigger hasn't been fired yet
                 if (!Boolean.TRUE.equals(quest.getTriggers().put("LEAVE_REGION_"+ region.config_id, true))) {
                     getSession().send(new PacketServerCondMeetQuestListUpdateNotify());
-                    getQuestManager().queueEvent(QuestTrigger.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("LEAVE_REGION_"+ region.config_id).getId(),0);
+                    getQuestManager().queueEvent(QuestContent.QUEST_CONTENT_TRIGGER_FIRE, quest.getTriggerData().get("LEAVE_REGION_"+ region.config_id).getId(),0);
                 }
             }
         });
@@ -1202,24 +1207,11 @@ public class Player {
     }
 
     public void onPlayerBorn() {
-        if (Grasscutter.getConfig().server.game.gameOptions.questing) getQuestManager().onPlayerBorn();
+        getQuestManager().onPlayerBorn();
+        // if (Grasscutter.getConfig().server.game.gameOptions.questing) getQuestManager().onPlayerBorn();
     }
 
     public void onLogin() {
-        // Quest - Commented out because a problem is caused if you log out while this quest is active
-        /*
-        if (getQuestManager().getMainQuestById(351) == null) {
-            GameQuest quest = getQuestManager().addQuest(35104);
-            if (quest != null) {
-                quest.finish();
-            }
-            getQuestManager().addQuest(35101);
-
-            this.setSceneId(3);
-            this.getPos().set(GameConstants.START_POSITION);
-        }
-        */
-
         // Create world
         World world = new World(this);
         world.addPlayer(this);

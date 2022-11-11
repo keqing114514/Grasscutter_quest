@@ -21,11 +21,6 @@ public final class UnlockAllCommand implements CommandHandler {
         Map<Integer, Integer> changed = new HashMap<>();
 
         for (var state : GameData.getOpenStateList()) {
-            // Don't unlock blacklisted open states.
-            if (PlayerProgressManager.BLACKLIST_OPEN_STATES.contains(state.getId())) {
-                continue;
-            }
-
             if (targetPlayer.getProgressManager().getOpenState(state.getId()) == 0) {
                 targetPlayer.getOpenStates().put(state.getId(), 1);
                 changed.put(state.getId(), 1);

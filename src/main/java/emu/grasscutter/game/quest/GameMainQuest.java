@@ -15,24 +15,17 @@ import emu.grasscutter.data.excels.RewardData;
 import emu.grasscutter.database.DatabaseHelper;
 import emu.grasscutter.game.player.Player;
 import emu.grasscutter.game.props.ActionReason;
-import emu.grasscutter.game.quest.enums.LogicType;
-import emu.grasscutter.game.quest.enums.ParentQuestState;
-import emu.grasscutter.game.quest.enums.QuestState;
-import emu.grasscutter.game.quest.enums.QuestTrigger;
+import emu.grasscutter.game.quest.enums.*;
 import emu.grasscutter.net.proto.ChildQuestOuterClass.ChildQuest;
 import emu.grasscutter.net.proto.ParentQuestOuterClass.ParentQuest;
-import emu.grasscutter.scripts.ScriptLoader;
 import emu.grasscutter.server.packet.send.PacketCodexDataUpdateNotify;
 import emu.grasscutter.server.packet.send.PacketFinishedParentQuestUpdateNotify;
-import emu.grasscutter.server.packet.send.PacketQuestListUpdateNotify;
 import emu.grasscutter.server.packet.send.PacketQuestProgressUpdateNotify;
 import emu.grasscutter.utils.Position;
-import lombok.Data;
 import lombok.Getter;
+import lombok.val;
 import org.bson.types.ObjectId;
 
-import javax.script.Bindings;
-import javax.script.CompiledScript;
 import java.util.*;
 
 @Entity(value = "quests", useDiscriminator = false)
@@ -49,6 +42,10 @@ public class GameMainQuest {
     @Getter private ParentQuestState state;
     @Getter private boolean isFinished;
     @Getter List<QuestGroupSuite> questGroupSuites;
+    // used to track already added group suites, so that it 
+    // doesnt keep incrementing on every rewind, 
+    // TODO probably change group suites to hash map for better organisation
+    @Getter Set<Integer> groupSuitesTracker;
 
     @Getter int[] suggestTrackMainQuestList;
     @Getter private Map<Integer,TalkData> talks;
@@ -67,6 +64,7 @@ public class GameMainQuest {
         this.questVars = new int[] {0,0,0,0,0};
         this.state = ParentQuestState.PARENT_QUEST_STATE_NONE;
         this.questGroupSuites = new ArrayList<>();
+        this.groupSuitesTracker = new TreeSet<>();
         addAllChildQuests();
     }
 
@@ -171,7 +169,7 @@ public class GameMainQuest {
         // handoff main quest
         if (mainQuestData.getSuggestTrackMainQuestList() != null) {
             Arrays.stream(mainQuestData.getSuggestTrackMainQuestList())
-                .forEach(getQuestManager()::startMainQuest);
+                .forEach((mainQuestId) -> {getQuestManager().startMainQuest(true, mainQuestId, false, "", 0);});
         }
     }
     //TODO
@@ -242,7 +240,7 @@ public class GameMainQuest {
 
     public boolean hasRewindPosition(int subId, List<Position> posAndRot){
         RewindData questRewind = GameData.getRewindDataMap().get(subId);
-        if (questRewind == null) return false; 
+        if (questRewind == null) return false;
 
         RewindData.AvatarData avatarData = questRewind.getAvatar();
         if (avatarData == null) return false;
@@ -290,7 +288,7 @@ public class GameMainQuest {
         if (dummyPointMap == null) return false;
 
         List<Float> transmitPosPos = dummyPointMap.get(transmitPos + ".pos");
-        List<Float> transmitPosRot = dummyPointMap.get(transmitPos + ".rot");                 
+        List<Float> transmitPosRot = dummyPointMap.get(transmitPos + ".rot");
         if (transmitPosPos == null) return false;
 
         posAndRot.add(0, new Position(transmitPosPos.get(0), transmitPosPos.get(1), transmitPosPos.get(2))); // position
@@ -307,19 +305,19 @@ public class GameMainQuest {
         }
     }
 
-    public void tryAcceptSubQuests(QuestTrigger condType, String paramStr, int... params) {
+    public void tryAcceptSubQuests(QuestCond condType, String paramStr, int... params) {
         try {
             List<GameQuest> subQuestsWithCond = getChildQuests().values().stream()
                 .filter(p -> p.getState() == QuestState.QUEST_STATE_UNSTARTED || p.getState() == QuestState.UNFINISHED)
-                .filter(p -> p.getQuestData().getAcceptCond().stream().anyMatch(q -> condType == QuestTrigger.QUEST_COND_NONE || q.getType() == condType))
+                .filter(p -> p.getQuestData().getAcceptCond().stream().anyMatch(q -> condType == QuestCond.QUEST_COND_NONE || q.getType() == condType))
                 .toList();
 
             for (GameQuest subQuestWithCond : subQuestsWithCond) {
-                List<QuestData.QuestCondition> acceptCond = subQuestWithCond.getQuestData().getAcceptCond();
+                val acceptCond = subQuestWithCond.getQuestData().getAcceptCond();
                 int[] accept = new int[acceptCond.size()];
 
                 for (int i = 0; i < subQuestWithCond.getQuestData().getAcceptCond().size(); i++) {
-                    QuestData.QuestCondition condition = acceptCond.get(i);
+                    val condition = acceptCond.get(i);
                     boolean result = this.getOwner().getServer().getQuestSystem().triggerCondition(subQuestWithCond, condition, paramStr, params);
                     accept[i] = result ? 1 : 0;
                 }
@@ -336,7 +334,7 @@ public class GameMainQuest {
 
     }
 
-    public void tryFailSubQuests(QuestTrigger condType, String paramStr, int... params) {
+    public void tryFailSubQuests(QuestContent condType, String paramStr, int... params) {
         try {
             List<GameQuest> subQuestsWithCond = getChildQuests().values().stream()
                 .filter(p -> p.getState() == QuestState.QUEST_STATE_UNFINISHED)
@@ -344,10 +342,10 @@ public class GameMainQuest {
                 .toList();
 
             for (GameQuest subQuestWithCond : subQuestsWithCond) {
-                List<QuestData.QuestCondition> failCond = subQuestWithCond.getQuestData().getFailCond();
+                val failCond = subQuestWithCond.getQuestData().getFailCond();
 
                 for (int i = 0; i < subQuestWithCond.getQuestData().getFailCond().size(); i++) {
-                    QuestData.QuestCondition condition = failCond.get(i);
+                    val condition = failCond.get(i);
                     if (condition.getType() == condType) {
                         boolean result = this.getOwner().getServer().getQuestSystem().triggerContent(subQuestWithCond, condition, paramStr, params);
                         subQuestWithCond.getFailProgressList()[i] = result ? 1 : 0;
@@ -368,7 +366,7 @@ public class GameMainQuest {
         }
     }
 
-    public void tryFinishSubQuests(QuestTrigger condType, String paramStr, int... params) {
+    public void tryFinishSubQuests(QuestContent condType, String paramStr, int... params) {
         try {
             List<GameQuest> subQuestsWithCond = getChildQuests().values().stream()
                 //There are subQuests with no acceptCond, but can be finished (example: 35104)
@@ -377,10 +375,10 @@ public class GameMainQuest {
                 .toList();
 
             for (GameQuest subQuestWithCond : subQuestsWithCond) {
-                List<QuestData.QuestCondition> finishCond = subQuestWithCond.getQuestData().getFinishCond();
+                val finishCond = subQuestWithCond.getQuestData().getFinishCond();
 
                 for (int i = 0; i < finishCond.size(); i++) {
-                    QuestData.QuestCondition condition = finishCond.get(i);
+                    val condition = finishCond.get(i);
                     if (condition.getType() == condType) {
                         boolean result = this.getOwner().getServer().getQuestSystem().triggerContent(subQuestWithCond, condition, paramStr, params);
                         subQuestWithCond.getFinishProgressList()[i] = result ? 1 : 0;
@@ -394,6 +392,7 @@ public class GameMainQuest {
 
                 if (shouldFinish)
                     subQuestWithCond.finish();
+                    getOwner().getProgressManager().tryUnlockOpenStates();
             }
         } catch (Exception e) {
             Grasscutter.getLogger().debug("An error occurred while trying to finish quest.", e);
